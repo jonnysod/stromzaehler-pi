@@ -98,19 +98,23 @@ def sha256_of_file(path):
 
 
 def get_previous_entry():
+    # Geht von neuestem zu ältestem Ordner durch und überspringt dabei
+    # Ordner ohne (oder noch ohne) entry.json - z.B. den gerade erst
+    # angelegten eigenen Ordner, oder Reste eines abgebrochenen Laufs.
+    # Wichtig: muss aufgerufen werden, BEVOR der neue entry_dir angelegt
+    # wird, sonst würde dieser sich selbst als "vorherigen" Eintrag sehen.
     if not os.path.isdir(DATA_DIR):
         return None
 
-    entries = sorted(os.listdir(DATA_DIR))
-    if not entries:
-        return None
+    entries = sorted(os.listdir(DATA_DIR), reverse=True)
 
-    last_entry_file = os.path.join(DATA_DIR, entries[-1], "entry.json")
-    if not os.path.isfile(last_entry_file):
-        return None
+    for entry_name in entries:
+        entry_file = os.path.join(DATA_DIR, entry_name, "entry.json")
+        if os.path.isfile(entry_file):
+            with open(entry_file) as f:
+                return json.load(f)
 
-    with open(last_entry_file) as f:
-        return json.load(f)
+    return None
 
 
 def bootstrap_entry():
@@ -214,11 +218,14 @@ if __name__ == "__main__":
     now = datetime.now(timezone.utc)
     folder_timestamp = format_folder_timestamp(now)
     entry_timestamp = format_entry_timestamp(now)
-    entry_dir = os.path.join(DATA_DIR, folder_timestamp)
-    os.makedirs(entry_dir, exist_ok=True)
 
+    # Reihenfolge wichtig: previous_entry ermitteln, BEVOR entry_dir
+    # angelegt wird (siehe Kommentar in get_previous_entry()).
     previous_entry = get_previous_entry()          # für Hash-Chain (lückenlos)
     last_plausible_entry = get_last_plausible_entry()  # für Wertevergleich
+
+    entry_dir = os.path.join(DATA_DIR, folder_timestamp)
+    os.makedirs(entry_dir, exist_ok=True)
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         image_raw, value = take_photo(entry_dir)
