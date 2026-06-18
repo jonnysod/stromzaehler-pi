@@ -4,7 +4,7 @@ import time
 import json
 import hashlib
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import RPi.GPIO as GPIO
 from config import (
     DATA_REPO_DIR,
@@ -17,8 +17,31 @@ from config import (
 LED_PIN = 17
 DATA_DIR = os.path.join(DATA_REPO_DIR, "data")
 
-TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
+# Ordnername: Basic-Format (keine Trennzeichen, dateisystemsicher)
+FOLDER_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%S"
+# entry.json: Extended-Format (lesbarer, gültiges ISO 8601)
+ENTRY_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S"
+# Beide immer in UTC, "Z" wird beim Schreiben manuell angehängt.
+# Beim Parsen erkennt strptime mit "%z" das literale "Z" seit Python 3.7
+# automatisch als UTC-Offset und liefert ein zeitzonenbewusstes datetime.
+
 MAX_ATTEMPTS = 3
+
+
+def format_folder_timestamp(dt):
+    return dt.strftime(FOLDER_TIMESTAMP_FORMAT) + "Z"
+
+
+def format_entry_timestamp(dt):
+    return dt.strftime(ENTRY_TIMESTAMP_FORMAT) + "Z"
+
+
+def parse_folder_timestamp(value):
+    return datetime.strptime(value, FOLDER_TIMESTAMP_FORMAT + "%z")
+
+
+def parse_entry_timestamp(value):
+    return datetime.strptime(value, ENTRY_TIMESTAMP_FORMAT + "%z")
 
 
 def take_photo(entry_dir):
@@ -102,12 +125,12 @@ def get_last_plausible_entry():
     if not os.path.isdir(DATA_DIR):
         return last_plausible
 
-    cutoff = datetime.now() - timedelta(days=SEARCH_DAYS_FOR_PLAUSIBLE_DATA)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=SEARCH_DAYS_FOR_PLAUSIBLE_DATA)
     entries = sorted(os.listdir(DATA_DIR))
 
     for entry_name in entries:
         try:
-            entry_time = datetime.strptime(entry_name, TIMESTAMP_FORMAT)
+            entry_time = parse_folder_timestamp(entry_name)
         except ValueError:
             continue  # Ordnername entspricht nicht dem erwarteten Format
 
@@ -143,8 +166,8 @@ def check_plausibility(value, current_timestamp, previous_entry):
 
     previous_timestamp = previous_entry.get("timestamp")
     try:
-        previous_time = datetime.strptime(previous_timestamp, TIMESTAMP_FORMAT)
-        current_time = datetime.strptime(current_timestamp, TIMESTAMP_FORMAT)
+        previous_time = parse_entry_timestamp(previous_timestamp)
+        current_time = parse_entry_timestamp(current_timestamp)
     except (TypeError, ValueError):
         return True  # Zeitstempel fehlt/ungültig, kein zeitbasierter Vergleich möglich
 
@@ -188,8 +211,10 @@ def git_commit_and_push(timestamp, entry_dir):
 
 
 if __name__ == "__main__":
-    timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
-    entry_dir = os.path.join(DATA_DIR, timestamp)
+    now = datetime.now(timezone.utc)
+    folder_timestamp = format_folder_timestamp(now)
+    entry_timestamp = format_entry_timestamp(now)
+    entry_dir = os.path.join(DATA_DIR, folder_timestamp)
     os.makedirs(entry_dir, exist_ok=True)
 
     previous_entry = get_previous_entry()          # für Hash-Chain (lückenlos)
@@ -197,14 +222,14 @@ if __name__ == "__main__":
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         image_raw, value = take_photo(entry_dir)
-        plausible = check_plausibility(value, timestamp, last_plausible_entry)
+        plausible = check_plausibility(value, entry_timestamp, last_plausible_entry)
         print(f"Versuch {attempt}: Wert={value} plausibel={plausible}")
 
         if plausible:
             break
 
-    entry_file = write_entry(timestamp, entry_dir, image_raw, value, plausible, previous_entry)
-    git_commit_and_push(timestamp, entry_dir)
+    entry_file = write_entry(entry_timestamp, entry_dir, image_raw, value, plausible, previous_entry)
+    git_commit_and_push(entry_timestamp, entry_dir)
 
     print(f"Zählerstand: {value} (plausibel: {plausible})")
-    print(f"Committed und gepusht: {timestamp}")
+    print(f"Committed und gepusht: {entry_timestamp}")

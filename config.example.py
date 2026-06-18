@@ -10,7 +10,7 @@ DATA_REPO_DIR = "/home/pi/stromzaehler-daten"
 # oder die letzte plausible Messung außerhalb von SEARCH_DAYS_FOR_PLAUSIBLE_DATA liegt.
 # Format wie TIMESTAMP_FORMAT in capture.py: "%Y-%m-%dT%H-%M-%S"
 INITIAL_VALUE = "000000"
-INITIAL_VALUE_TIMESTAMP = "2026-01-01T00-00-00"
+INITIAL_VALUE_TIMESTAMP = "2026-01-01T00:00:00Z"
 
 # Maximal plausibler Anstieg in kWh pro vollen 15 Minuten (wird proportional
 # auf die tatsächlich verstrichene Zeit seit der letzten plausiblen Messung skaliert)
