@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stromzähler Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root {
+      --accent: #2563eb;
+      --bg: #f8fafc;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin: 0 0 1.5rem 0;
+    }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .filters label {
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+
+    .filters input[type="date"] {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.875rem;
+    }
+
+    .filters button {
+      border: 1px solid var(--border);
+      background: white;
+      border-radius: 6px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.875rem;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .filters button:hover {
+      background: var(--bg);
+    }
+
+    .chart-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-top: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Stromzähler Dashboard</h1>
+
+  <div class="filters">
+    <label for="from-date">Von</label>
+    <input type="date" id="from-date">
+    <label for="to-date">Bis</label>
+    <input type="date" id="to-date">
+    <button id="reset-filter">Zurücksetzen</button>
+  </div>
+
+  <div class="chart-card">
+    <canvas id="chart" height="100"></canvas>
+    <div class="status" id="status">Lade Daten…</div>
+  </div>
+
+  <script>
+    let allEntries = [];
+    let chart = null;
+
+    function localDateString(date) {
+      // Lokale Kalendertag-Repräsentation (nicht UTC!), damit sie
+      // direkt mit dem Wert eines <input type="date"> vergleichbar ist.
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function formatLabel(date) {
+      return date.toLocaleString("de-DE", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    function getFilteredEntries() {
+      const fromValue = document.getElementById("from-date").value;
+      const toValue = document.getElementById("to-date").value;
+
+      return allEntries.filter((entry) => {
+        const localDate = new Date(entry.timestamp);
+        const dayString = localDateString(localDate);
+
+        if (fromValue && dayString < fromValue) return false;
+        if (toValue && dayString > toValue) return false;
+        return true;
+      });
+    }
+
+    function renderChart() {
+      const filtered = getFilteredEntries();
+      const labels = filtered.map((e) => formatLabel(new Date(e.timestamp)));
+      const values = filtered.map((e) => e.value);
+
+      const status = document.getElementById("status");
+      status.textContent = `${filtered.length} Messwerte`;
+
+      if (chart) {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = values;
+        chart.update();
+        return;
+      }
+
+      const ctx = document.getElementById("chart").getContext("2d");
+      chart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Zählerstand (kWh)",
+              data: values,
+              borderColor: "#2563eb",
+              backgroundColor: "rgba(37, 99, 235, 0.08)",
+              borderWidth: 2,
+              pointRadius: 2,
+              tension: 0.15,
+              fill: true,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: {
+              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+            },
+            y: {
+              title: { display: true, text: "kWh" },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+          },
+        },
+      });
+    }
+
+    async function loadData() {
+      const status = document.getElementById("status");
+      try {
+        const res = await fetch("/api/data");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        allEntries = await res.json();
+        renderChart();
+      } catch (err) {
+        status.textContent = `Fehler beim Laden der Daten: ${err.message}`;
+      }
+    }
+
+    document.getElementById("from-date").addEventListener("change", renderChart);
+    document.getElementById("to-date").addEventListener("change", renderChart);
+    document.getElementById("reset-filter").addEventListener("click", () => {
+      document.getElementById("from-date").value = "";
+      document.getElementById("to-date").value = "";
+      renderChart();
+    });
+
+    loadData();
+  </script>
+</body>
+</html>
