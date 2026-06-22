@@ -182,7 +182,50 @@ def check_plausibility(value, current_timestamp, previous_entry):
     return 0 <= diff <= max_allowed_increase
 
 
-def write_entry(timestamp, entry_dir, image_raw, value, plausible, previous_entry):
+def check_plausibility_relaxed(value, current_timestamp, last_plausible_entry):
+    """Fallback-Prüfung bei wiederholtem plausible=false mit gleichem Wert.
+
+    Prüft ob der Wert ohne die letzte Stelle (10er-Genauigkeit) gegen den
+    letzten plausiblen Wert ohne letzte Stelle plausibel wäre. Fängt den
+    Rollenzähler-Fehlerfall ab, bei dem ein Misread einer im Übergang
+    befindlichen letzten Stelle einen korrekten Folgewert blockiert
+    (z.B. Misread "052993" ankert sich, korrekte "052992" werden abgelehnt).
+
+    Wird nur aufgerufen, wenn:
+    - der vorherige Eintrag plausible=false hat
+    - der vorherige Wert identisch zum aktuellen Wert ist
+    - der normale Check bereits fehlgeschlagen ist
+    """
+    if not last_plausible_entry:
+        return False
+
+    truncated_value = value[:-1]
+    truncated_prev = {
+        "value_raw": last_plausible_entry["value_raw"][:-1],
+        "timestamp": last_plausible_entry["timestamp"],
+    }
+
+    # check_plausibility erwartet 6-stellige Werte - wir übergeben hier
+    # bewusst 5-stellige, die Längenprüfung schlägt also fehl. Daher
+    # direkt die Kernlogik replizieren ohne Längencheck.
+    if not truncated_value.isdigit() or not truncated_prev["value_raw"].isdigit():
+        return False
+
+    previous_timestamp = truncated_prev["timestamp"]
+    try:
+        previous_time = parse_entry_timestamp(previous_timestamp)
+        current_time = parse_entry_timestamp(current_timestamp)
+    except (TypeError, ValueError):
+        return False
+
+    elapsed_minutes = max((current_time - previous_time).total_seconds() / 60, 1)
+    max_allowed_increase = MAX_PLAUSIBLE_INCREASE_PER_15_MIN * (elapsed_minutes / 15)
+
+    diff = int(truncated_value) - int(truncated_prev["value_raw"])
+    return 0 <= diff <= max_allowed_increase
+
+
+def write_entry(timestamp, entry_dir, image_raw, value, plausible, previous_entry, note=None):
     image_hash = sha256_of_file(image_raw)
     prev_hash = previous_entry["entry_hash"] if previous_entry else None
 
@@ -191,8 +234,11 @@ def write_entry(timestamp, entry_dir, image_raw, value, plausible, previous_entr
         "value_raw": value,
         "plausible": plausible,
         "image_hash": image_hash,
-        "prev_hash": prev_hash
+        "prev_hash": prev_hash,
     }
+
+    if note is not None:
+        entry["note"] = note
 
     entry_string = json.dumps(entry, sort_keys=True)
     entry_hash = hashlib.sha256(entry_string.encode()).hexdigest()
@@ -227,6 +273,7 @@ if __name__ == "__main__":
     entry_dir = os.path.join(DATA_DIR, folder_timestamp)
     os.makedirs(entry_dir, exist_ok=True)
 
+    note = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         image_raw, value = take_photo(entry_dir)
         plausible = check_plausibility(value, entry_timestamp, last_plausible_entry)
@@ -235,8 +282,17 @@ if __name__ == "__main__":
         if plausible:
             break
 
-    entry_file = write_entry(entry_timestamp, entry_dir, image_raw, value, plausible, previous_entry)
+    if not plausible:
+        prev_not_plausible = previous_entry and not previous_entry.get("plausible")
+        prev_same_value = previous_entry and previous_entry.get("value_raw") == value
+        if prev_not_plausible and prev_same_value:
+            if check_plausibility_relaxed(value, entry_timestamp, last_plausible_entry):
+                plausible = True
+                note = "relaxed_truncation"
+                print(f"Relaxed-Check greift: {value} akzeptiert (note: relaxed_truncation)")
+
+    entry_file = write_entry(entry_timestamp, entry_dir, image_raw, value, plausible, previous_entry, note)
     git_commit_and_push(entry_timestamp, entry_dir)
 
-    print(f"Zählerstand: {value} (plausibel: {plausible})")
+    print(f"Zählerstand: {value} (plausibel: {plausible}{f', note: {note}' if note else ''})")
     print(f"Committed und gepusht: {entry_timestamp}")
