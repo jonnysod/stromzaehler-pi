@@ -3,85 +3,181 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stromzähler Dashboard</title>
+  <title>Stromzähler</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
     :root {
-      --accent: #2563eb;
-      --bg: #f8fafc;
-      --text: #1e293b;
-      --muted: #64748b;
-      --border: #e2e8f0;
+      --bg:        #f8fafc;
+      --surface:   #ffffff;
+      --border:    #e2e8f0;
+      --text:      #1e293b;
+      --muted:     #64748b;
+      --amber:     #f59e0b;
+      --amber-bg:  rgba(245, 158, 11, 0.10);
+      --indigo:    #6366f1;
+      --indigo-bg: rgba(99, 102, 241, 0.10);
+      --red:       #ef4444;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      margin: 0;
-      padding: 2rem;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 2rem;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1.75rem;
+      flex-wrap: wrap;
+      gap: 1rem;
     }
 
     h1 {
-      font-size: 1.4rem;
+      font-size: 1.1rem;
       font-weight: 600;
-      margin: 0 0 1.5rem 0;
+      letter-spacing: 0.02em;
+      color: var(--muted);
+      text-transform: uppercase;
     }
 
+    .stat-total {
+      text-align: right;
+    }
+
+    .stat-total .value {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .stat-total .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+
+    /* ── Filter ── */
     .filters {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
       flex-wrap: wrap;
     }
 
     .filters label {
-      font-size: 0.875rem;
+      font-size: 0.8rem;
       color: var(--muted);
     }
 
     .filters input[type="date"] {
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 0.4rem 0.6rem;
-      font-size: 0.875rem;
+      padding: 0.35rem 0.55rem;
+      font-size: 0.8rem;
+      background: var(--surface);
+      color: var(--text);
     }
 
     .filters button {
       border: 1px solid var(--border);
-      background: white;
+      background: var(--surface);
       border-radius: 6px;
-      padding: 0.4rem 0.75rem;
-      font-size: 0.875rem;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.8rem;
       cursor: pointer;
-      color: var(--text);
+      color: var(--muted);
     }
 
-    .filters button:hover {
-      background: var(--bg);
-    }
+    .filters button:hover { background: var(--bg); }
 
+    /* ── Chart card ── */
     .chart-card {
-      background: white;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 1.5rem;
+      padding: 1.5rem 1.5rem 1rem;
     }
 
-    .status {
+    /* ── Legend ── */
+    .legend {
+      display: flex;
+      gap: 1.25rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.78rem;
       color: var(--muted);
-      font-size: 0.875rem;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Implausible strip ── */
+    .implausible-strip-wrap {
+      margin-top: 0.75rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .implausible-strip-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .implausible-strip {
+      position: relative;
+      height: 12px;
+      background: var(--bg);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .implausible-tick {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      height: 100%;
+      background: var(--red);
+      opacity: 0.7;
+      transform: translateX(-50%);
+    }
+
+    /* ── Status ── */
+    .status {
+      font-size: 0.75rem;
+      color: var(--muted);
       margin-top: 0.75rem;
     }
   </style>
 </head>
 <body>
-  <h1>Stromzähler Dashboard</h1>
+
+  <header>
+    <h1>Stromzähler</h1>
+    <div class="stat-total">
+      <div class="value" id="total-value">–</div>
+      <div class="label">kWh gesamt seit Messbeginn</div>
+    </div>
+  </header>
 
   <div class="filters">
     <label for="from-date">Von</label>
@@ -92,17 +188,37 @@
   </div>
 
   <div class="chart-card">
-    <canvas id="chart" height="100"></canvas>
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background: var(--amber)"></div>
+        Verbrauch pro Intervall (kWh)
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background: var(--indigo)"></div>
+        Kumuliert seit Bereichsstart (kWh)
+      </div>
+    </div>
+
+    <canvas id="chart" height="90"></canvas>
+
+    <div class="implausible-strip-wrap" id="strip-wrap" style="display:none">
+      <div class="implausible-strip-label">Unplausible Messungen</div>
+      <div class="implausible-strip" id="implausible-strip"></div>
+    </div>
+
     <div class="status" id="status">Lade Daten…</div>
   </div>
 
   <script>
-    let allEntries = [];
-    let chart = null;
+    // ── State ──────────────────────────────────────────────────────────
+    let allEntries      = [];   // [{timestamp, value}], volle Reihe
+    let allDiffs        = [];   // parallel zu allEntries; diffs[0] = null
+    let implausibleTs   = [];   // [ISO-string, ...]
+    let chart           = null;
 
+    // ── Hilfsfunktionen ───────────────────────────────────────────────
     function localDateString(date) {
-      // Lokale Kalendertag-Repräsentation (nicht UTC!), damit sie
-      // direkt mit dem Wert eines <input type="date"> vergleichbar ist.
+      // Lokaler Kalendertag als "YYYY-MM-DD" – zum Vergleich mit <input type="date">
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, "0");
       const d = String(date.getDate()).padStart(2, "0");
@@ -111,94 +227,203 @@
 
     function formatLabel(date) {
       return date.toLocaleString("de-DE", {
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
+        day: "2-digit", month: "2-digit",
+        hour: "2-digit", minute: "2-digit",
       });
     }
 
-    function getFilteredEntries() {
+    // ── Diffs über die vollständige Reihe berechnen ───────────────────
+    // Erst nach dem Filtern werden nur die sichtbaren Einträge gezeigt –
+    // aber der Diff des ersten sichtbaren Eintrags bezieht sich auf seinen
+    // echten Vorgänger, auch wenn der außerhalb des Zeitraums liegt.
+    function computeAllDiffs(entries) {
+      return entries.map((entry, i) => {
+        if (i === 0) return null;
+        return entry.value - entries[i - 1].value;
+      });
+    }
+
+    // ── Filtern ───────────────────────────────────────────────────────
+    function getFilteredIndices() {
       const fromValue = document.getElementById("from-date").value;
-      const toValue = document.getElementById("to-date").value;
+      const toValue   = document.getElementById("to-date").value;
 
-      return allEntries.filter((entry) => {
-        const localDate = new Date(entry.timestamp);
-        const dayString = localDateString(localDate);
-
-        if (fromValue && dayString < fromValue) return false;
-        if (toValue && dayString > toValue) return false;
-        return true;
-      });
+      return allEntries
+        .map((entry, i) => ({ entry, i }))
+        .filter(({ entry }) => {
+          const day = localDateString(new Date(entry.timestamp));
+          if (fromValue && day < fromValue) return false;
+          if (toValue   && day > toValue)   return false;
+          return true;
+        })
+        .map(({ i }) => i);
     }
 
+    // ── Chart rendern ─────────────────────────────────────────────────
     function renderChart() {
-      const filtered = getFilteredEntries();
-      const labels = filtered.map((e) => formatLabel(new Date(e.timestamp)));
-      const values = filtered.map((e) => e.value);
+      const indices = getFilteredIndices();
 
-      const status = document.getElementById("status");
-      status.textContent = `${filtered.length} Messwerte`;
-
-      if (chart) {
-        chart.data.labels = labels;
-        chart.data.datasets[0].data = values;
-        chart.update();
+      if (indices.length === 0) {
+        document.getElementById("status").textContent = "Keine Messwerte im gewählten Zeitraum.";
+        if (chart) { chart.data.labels = []; chart.data.datasets.forEach(ds => ds.data = []); chart.update(); }
+        renderStrip([], []);
         return;
       }
 
-      const ctx = document.getElementById("chart").getContext("2d");
-      chart = new Chart(ctx, {
-        type: "line",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "Zählerstand (kWh)",
-              data: values,
-              borderColor: "#2563eb",
-              backgroundColor: "rgba(37, 99, 235, 0.08)",
-              borderWidth: 2,
-              pointRadius: 2,
-              tension: 0.15,
-              fill: true,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          scales: {
-            x: {
-              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
-            },
-            y: {
-              title: { display: true, text: "kWh" },
-            },
+      const filtered      = indices.map(i => allEntries[i]);
+      const filteredDiffs = indices.map(i => allDiffs[i]);
+
+      const labels      = filtered.map(e => formatLabel(new Date(e.timestamp)));
+      const diffData    = filteredDiffs.map(d => d !== null ? d : null);
+      const baseValue   = filtered[0].value;
+      const cumulData   = filtered.map(e => +(e.value - baseValue).toFixed(3));
+
+      document.getElementById("status").textContent =
+        `${filtered.length} Messwerte · ${formatLabel(new Date(filtered[0].timestamp))} – ${formatLabel(new Date(filtered[filtered.length - 1].timestamp))}`;
+
+      if (chart) {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = diffData;
+        chart.data.datasets[1].data = cumulData;
+        chart.update();
+      } else {
+        const ctx = document.getElementById("chart").getContext("2d");
+        chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Verbrauch pro Intervall (kWh)",
+                data: diffData,
+                borderColor: "#f59e0b",
+                backgroundColor: "rgba(245,158,11,0.10)",
+                borderWidth: 2,
+                pointRadius: 2,
+                tension: 0.15,
+                fill: true,
+                yAxisID: "yDiff",
+                spanGaps: false,
+              },
+              {
+                label: "Kumuliert seit Bereichsstart (kWh)",
+                data: cumulData,
+                borderColor: "#6366f1",
+                backgroundColor: "rgba(99,102,241,0.08)",
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0.2,
+                fill: false,
+                yAxisID: "yCumul",
+              },
+            ],
           },
-          plugins: {
-            legend: { display: false },
+          options: {
+            responsive: true,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+              x: {
+                ticks: {
+                  maxRotation: 0,
+                  autoSkip: true,
+                  maxTicksLimit: 10,
+                  font: { size: 11 },
+                },
+              },
+              yDiff: {
+                position: "left",
+                title: { display: true, text: "kWh / Intervall", font: { size: 11 } },
+                beginAtZero: true,
+              },
+              yCumul: {
+                position: "right",
+                title: { display: true, text: "kWh kumuliert", font: { size: 11 } },
+                beginAtZero: true,
+                grid: { drawOnChartArea: false },
+              },
+            },
+            plugins: { legend: { display: false } },
           },
-        },
+        });
+      }
+
+      // Implausible Strip
+      const rangeStart = new Date(filtered[0].timestamp).getTime();
+      const rangeEnd   = new Date(filtered[filtered.length - 1].timestamp).getTime();
+      renderStrip(implausibleTs, [rangeStart, rangeEnd]);
+    }
+
+    // ── Implausible Strip ─────────────────────────────────────────────
+    function renderStrip(timestamps, [rangeStart, rangeEnd] = []) {
+      const wrap  = document.getElementById("strip-wrap");
+      const strip = document.getElementById("implausible-strip");
+      strip.innerHTML = "";
+
+      if (!rangeStart || !rangeEnd || rangeStart === rangeEnd) {
+        wrap.style.display = "none";
+        return;
+      }
+
+      const inRange = timestamps.filter(ts => {
+        const t = new Date(ts).getTime();
+        return t >= rangeStart && t <= rangeEnd;
+      });
+
+      if (inRange.length === 0) {
+        wrap.style.display = "none";
+        return;
+      }
+
+      wrap.style.display = "block";
+      const span = rangeEnd - rangeStart;
+
+      inRange.forEach(ts => {
+        const pct = ((new Date(ts).getTime() - rangeStart) / span) * 100;
+        const tick = document.createElement("div");
+        tick.className = "implausible-tick";
+        tick.style.left = `${pct}%`;
+        tick.title = new Date(ts).toLocaleString("de-DE");
+        strip.appendChild(tick);
       });
     }
 
+    // ── Daten laden ───────────────────────────────────────────────────
     async function loadData() {
       const status = document.getElementById("status");
       try {
-        const res = await fetch("/api/data");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        allEntries = await res.json();
+        const [absRes, implRes, statsRes] = await Promise.all([
+          fetch("/api/data/absolute"),
+          fetch("/api/data/implausible"),
+          fetch("/api/data/stats"),
+        ]);
+
+        if (!absRes.ok || !implRes.ok || !statsRes.ok) {
+          throw new Error("Fehler beim Laden der API-Daten");
+        }
+
+        allEntries    = await absRes.json();
+        implausibleTs = await implRes.json();
+        const stats   = await statsRes.json();
+
+        allDiffs = computeAllDiffs(allEntries);
+
+        const totalEl = document.getElementById("total-value");
+        totalEl.textContent = stats.total_since_start !== null
+          ? stats.total_since_start.toFixed(1)
+          : "–";
+
         renderChart();
       } catch (err) {
-        status.textContent = `Fehler beim Laden der Daten: ${err.message}`;
+        status.textContent = `Fehler: ${err.message}`;
       }
     }
 
+    // ── Events ────────────────────────────────────────────────────────
     document.getElementById("from-date").addEventListener("change", renderChart);
     document.getElementById("to-date").addEventListener("change", renderChart);
     document.getElementById("reset-filter").addEventListener("click", () => {
       document.getElementById("from-date").value = "";
-      document.getElementById("to-date").value = "";
+      document.getElementById("to-date").value   = "";
       renderChart();
     });
 
