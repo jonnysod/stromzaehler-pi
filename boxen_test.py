@@ -14,34 +14,12 @@ Aufruf:
     python3 boxen_test.py foto.jpg --ocr    # zusaetzlich Tesseract pro Box
 """
 
-import os
-import sys
 import math
-import shutil
-import tempfile
+import os
 import subprocess
+import sys
 
-# ---------------------------------------------------------------------------
-# Boxen in VOLLER Bildkoordinate, exakt wie ImageMagick -crop WxH+X+Y.
-# x,y = linke obere Ecke. Nur diese Zahlen anfassen.
-#
-# level: None      -> -auto-level (gut, um zuerst nur die LAGE zu beurteilen)
-#        "8%,30%"  -> festes -level, sobald die Lage stimmt und du pro Box
-#                     die echten Helligkeitswerte misst (siehe MESSEN unten)
-# rot:   0         -> kein Drehen
-#        3         -> 3 Grad GEGEN den Uhrzeigersinn vor dem Zuschnitt
-#        -3        -> 3 Grad IM Uhrzeigersinn
-#                     (gedreht wird um den Mittelpunkt der jeweiligen Box)
-# ---------------------------------------------------------------------------
-BOXES = [
-    {"name": "d1", "x":   74, "y": 452, "w": 135, "h": 250, "level": None, "rot": 0},
-    {"name": "d2", "x":  302, "y": 452, "w": 135, "h": 250, "level": None, "rot": 0},
-    {"name": "d3", "x":  520, "y": 452, "w": 140, "h": 250, "level": None, "rot": 0},
-    {"name": "d4", "x":  747, "y": 442, "w": 153, "h": 250, "level": None, "rot": 0},
-    {"name": "d5", "x":  980, "y": 452, "w": 144, "h": 250, "level": None, "rot": 2},
-    {"name": "d6", "x": 1210, "y": 452, "w": 139, "h": 250, "level": None, "rot": 2},
-    {"name": "Z",  "x": 1459, "y": 470, "w": 130, "h": 240, "level": None, "rot": 2},
-]
+from boxen import BOXES, MAGICK, TMP, crop_box
 
 # Nur fuers Overlay: hebt das dunkle Display-Feld an, damit man die Ziffern
 # unter den Boxen ueberhaupt sieht. Beeinflusst die Boxen selbst NICHT.
@@ -52,14 +30,6 @@ DISPLAY_LEVEL = "0%,55%"
 #   "8"  = ein Wort (oft robuster, auch wenn nur eine Ziffer drin ist)
 #   "13" = rohe Zeile, ohne Tesseract-eigene Vorsegmentierung
 PSM = "10"
-
-# Auf dem Pi heisst der Befehl 'convert' (IM6), auf dem Mac per brew 'magick' (IM7).
-MAGICK = "magick" if shutil.which("magick") else "convert"
-
-# Zwischendateien NICHT hart nach /tmp schreiben: auf macOS ist /tmp fuer
-# Homebrew-Binaries (Tesseract) gesperrt ("failed to open"). tempfile nimmt
-# das benutzereigene Temp-Verzeichnis ($TMPDIR), auf dem Pi weiterhin /tmp.
-TMP = tempfile.gettempdir()
 
 
 def _find_font():
@@ -78,36 +48,6 @@ def _find_font():
 
 
 FONT = _find_font()
-
-
-def geom(b):
-    return f"{b['w']}x{b['h']}+{b['x']}+{b['y']}"
-
-
-def crop_box(src, b, out):
-    """Schneidet Box b aus src nach out (rohes Graustufen-PNG, ungelevelt).
-    Bei rot != 0 wird vorher um den Box-Mittelpunkt gedreht; positiver Winkel
-    = gegen den Uhrzeigersinn."""
-    rot = b.get("rot", 0)
-    if not rot:
-        subprocess.run([MAGICK, src, "-crop", geom(b), "+repage", out], check=True)
-        return
-    # Grosszuegig quadratisch um den Box-Mittelpunkt schneiden (halbe Diagonale
-    # als Rand, damit beim Drehen keine Ecke fehlt), dann drehen, dann die
-    # eigentliche Box aus der Mitte herausschneiden.
-    pad = int(math.hypot(b["w"], b["h"]) / 2) + 2
-    cx, cy = b["x"] + b["w"] // 2, b["y"] + b["h"] // 2
-    side = pad * 2
-    bx, by = pad - b["w"] // 2, pad - b["h"] // 2
-    subprocess.run([
-        MAGICK, src,
-        "-crop", f"{side}x{side}+{cx - pad}+{cy - pad}", "+repage",
-        "-virtual-pixel", "black",
-        "-distort", "SRT", str(-rot),   # SRT positiv = im UZS -> fuer CCW negieren
-        "+repage",
-        "-crop", f"{b['w']}x{b['h']}+{bx}+{by}", "+repage",
-        out,
-    ], check=True)
 
 
 def make_overlay(src, out):
@@ -171,7 +111,8 @@ def make_contact(src, out):
 
 
 def ocr_box(src, b):
-    # Gleiche Pipeline wie capture.py, nur pro Box und mit PSM (Einzelzeichen).
+    # Gleiche Pipeline wie boxen.py, aber mit konfigurierba rem PSM
+    # (zum Experimentieren waehrend der Kalibrierung).
     # Eingabe fuer Tesseract als sauberes 8-Bit-TIFF ohne Profil: ImageMagick 7
     # (magick) schreibt PNGs, die die Tesseract-Bibliothek (Leptonica) auf manchen
     # Systemen nicht einlesen kann -> leere Ausgabe. TIFF + -depth 8 -strip umgeht das.
