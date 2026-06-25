@@ -2,3 +2,8 @@ config.py
 __pycache__/
 *.pyc
 cron.log
+
+# don't commit local png and jpg that are generated for tests
+*.png
+*.jpg
+*.jpeg
