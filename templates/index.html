@@ -274,9 +274,10 @@
       const filteredDiffs = indices.map(i => allDiffs[i]);
 
       const labels      = filtered.map(e => formatLabel(new Date(e.timestamp)));
-      const diffData    = filteredDiffs.map(d => d !== null ? d : null);
+      // value ist Wh-Integer → durch 1000 für kWh-Anzeige
+      const diffData    = filteredDiffs.map(d => d !== null ? +(d / 1000).toFixed(3) : null);
       const baseValue   = filtered[0].value;
-      const cumulData   = filtered.map(e => +(e.value - baseValue).toFixed(3));
+      const cumulData   = filtered.map(e => +((e.value - baseValue) / 1000).toFixed(3));
 
       document.getElementById("status").textContent =
         `${filtered.length} Messwerte · ${formatLabel(new Date(filtered[0].timestamp))} – ${formatLabel(new Date(filtered[filtered.length - 1].timestamp))}`;
@@ -409,7 +410,7 @@
 
         const totalEl = document.getElementById("total-value");
         totalEl.textContent = stats.total_since_start !== null
-          ? stats.total_since_start.toFixed(1)
+          ? (stats.total_since_start / 1000).toFixed(1)
           : "–";
 
         renderChart();

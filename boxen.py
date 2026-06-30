@@ -155,22 +155,31 @@ def _ocr_box(tif_path):
     return best_char, best_conf
 
 
-def read_boxes(foto_path):
+def read_boxes(foto_path, debug_label=None, debug_dir=None):
     """Liest alle 7 Boxen aus dem Foto.
 
     Parameter:
-      foto_path – Pfad zum vollen Originalfoto (JPG)
+      foto_path   – Pfad zum vollen Originalfoto (JPG)
+      debug_label – Zeitstempel-Präfix im Basic-Format, z.B. '20260625T143001Z'.
+                    Ist dieser und debug_dir gesetzt, wird das gelevelte TIFF
+                    (genau das, was Tesseract sah) nach
+                    {debug_dir}/{debug_label}_{boxname}.tif kopiert.
+      debug_dir   – Zielverzeichnis für Debug-TIFFs; muss existieren.
 
     Rückgabe:
       {boxname: (zeichen, konfidenz)}
         zeichen   : "0".."9" oder "" (Leerwert ist gültiger Zustand)
         konfidenz : 0..100; 0 bei Leerwert
 
-    Temp-Dateien werden immer aufgeräumt.
+    Temp-Dateien werden immer aufgeräumt. Debug-Copies bleiben liegen
+    (Retention via systemd-tmpfiles, nicht per Code).
     """
     results = {}
     with tempfile.TemporaryDirectory(dir=TMP) as tmp_dir:
         for box in BOXES:
             tif_path = _process_box(foto_path, box, tmp_dir)
             results[box["name"]] = _ocr_box(tif_path)
+            if debug_label and debug_dir:
+                dst = os.path.join(debug_dir, f"{debug_label}_{box['name']}.tif")
+                shutil.copy2(tif_path, dst)
     return results

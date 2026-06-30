@@ -43,10 +43,10 @@ def scan_data():
         if not timestamp:
             continue
 
-        if data.get("plausible") and value_raw.isdigit():
+        if data.get("plausible") and isinstance(value_raw, int):
             plausible_entries.append({
                 "timestamp": timestamp,
-                "value": int(value_raw),
+                "value": value_raw,   # Wh-Integer; Anzeige teilt clientseitig durch 1000
             })
         else:
             implausible_timestamps.append(timestamp)
@@ -81,7 +81,7 @@ def api_stats():
     latest_value = entries[-1]["value"]
 
     try:
-        start_value = int(INITIAL_VALUE)
+        start_value = int(INITIAL_VALUE) if INITIAL_VALUE else entries[0]["value"]
     except (TypeError, ValueError):
         start_value = entries[0]["value"]
 
