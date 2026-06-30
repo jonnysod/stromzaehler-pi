@@ -7,3 +7,8 @@ cron.log
 *.png
 *.jpg
 *.jpeg
+
+# macOS
+.DS_Store
+*.swp
+
