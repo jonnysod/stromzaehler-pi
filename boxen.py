@@ -143,7 +143,7 @@ def _ocr_box(tif_path):
         if len(parts) < 12:
             continue
         try:
-            conf = int(parts[10])
+            conf = int(float(parts[10]))
         except ValueError:
             continue
         if conf < 0:
