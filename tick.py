@@ -53,7 +53,8 @@ from config import (
 # ---------------------------------------------------------------------------
 # Konstanten
 # ---------------------------------------------------------------------------
-LED_PIN    = 17
+LED_PIN_01    = 17
+LED_PIN_02    = 27
 LOCK_PATH  = os.path.join(DATA_REPO_DIR, "tick.lock")
 _TS_FMT    = "%Y-%m-%dT%H:%M:%S"   # ohne Z (wird manuell angehängt)
 _TS_BASIC  = "%Y%m%dT%H%M%S"       # Basic-Format für Dateinamen/Labels
@@ -127,9 +128,11 @@ def _take_photo(path: str) -> None:
     GPIO wird immer aufgeräumt (finally).
     """
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(LED_PIN, GPIO.OUT)
+    GPIO.setup(LED_PIN_1, GPIO.OUT)
+    GPIO.setup(LED_PIN_2, GPIO.OUT)
     try:
-        GPIO.output(LED_PIN, True)
+        GPIO.output(LED_PIN_1, True)
+        GPIO.output(LED_PIN_2, True)
         time.sleep(0.5)
         subprocess.run(
             [
@@ -148,7 +151,8 @@ def _take_photo(path: str) -> None:
             errors="replace",
         )
     finally:
-        GPIO.output(LED_PIN, False)
+        GPIO.output(LED_PIN_1, False)
+        GPIO.output(LED_PIN_2, False)
         GPIO.cleanup()
 
 

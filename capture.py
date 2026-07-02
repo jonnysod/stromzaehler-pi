@@ -14,7 +14,7 @@ from config import (
     SEARCH_DAYS_FOR_PLAUSIBLE_DATA,
 )
 
-LED_PIN = 17
+LED_PIN = 27
 DATA_DIR = os.path.join(DATA_REPO_DIR, "data")
 
 # Ordnername: Basic-Format (keine Trennzeichen, dateisystemsicher)
