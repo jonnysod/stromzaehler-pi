@@ -149,7 +149,9 @@ def _ocr_box(tif_path):
         if len(parts) < 12:
             continue
         try:
-            conf = int(parts[10])
+            # Tesseract 5.x emits float conf strings ("96.72") in tsv; older
+            # builds (e.g. on the Pi) emit ints. float() first handles both.
+            conf = int(float(parts[10]))
         except ValueError:
             continue
         if conf < 0:
