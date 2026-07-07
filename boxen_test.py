@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Kalibrier-Helfer fuer die Ziffern-Segmentierung.
+Calibration helper for digit segmentation.
 
-Schneidet aus einem Foto die einzelnen Ziffern-Boxen heraus und erzeugt:
-  <name>_overlay.png  - Foto mit eingezeichneten Boxen   (Lage justieren)
-  <name>_boxen.png    - alle Boxen einzeln nebeneinander  (Inhalt beurteilen)
+Crops the individual digit boxes from a photo and produces:
+  <name>_overlay.png  - photo with boxes drawn on it   (adjust placement)
+  <name>_boxen.png    - all boxes side by side          (judge content)
 
-Workflow: laufen lassen, Bilder anschauen, Zahlen in BOXES anpassen,
-wiederholen, bis jede Ziffer mittig und vollstaendig in ihrer Box sitzt.
+Workflow: run, look at the images, tweak BOXES, repeat until every digit
+sits centered and complete in its box.
 
-Aufruf:
-    python3 boxen_test.py foto.jpg          # nur Bilder
-    python3 boxen_test.py foto.jpg --ocr    # zusaetzlich Tesseract pro Box
+Usage:
+    python3 boxen_test.py foto.jpg          # images only
+    python3 boxen_test.py foto.jpg --ocr    # plus Tesseract per box
 """
 
 import math
@@ -19,32 +19,31 @@ import os
 import subprocess
 import sys
 
-from boxen import BOXES, MAGICK, TMP, crop_box
+from boxen import BOXES, MAGICK, TMP, crop_box, process_box
 
-# Nur fuers Overlay: hebt das dunkle Display-Feld an, damit man die Ziffern
-# unter den Boxen ueberhaupt sieht. Beeinflusst die Boxen selbst NICHT.
+# Overlay only: lifts the dark display field so the digits under the boxes
+# are visible. Does NOT affect the boxes themselves.
 DISPLAY_LEVEL = "0%,55%"
 
-# Tesseract Page-Segmentation-Mode fuer eine Einzelbox. Zum Experimentieren:
-#   "10" = ein Einzelzeichen (theoretisch passend, aber bei Unschaerfe zickig)
-#   "8"  = ein Wort (oft robuster, auch wenn nur eine Ziffer drin ist)
-#   "13" = rohe Zeile, ohne Tesseract-eigene Vorsegmentierung
+# Tesseract page-segmentation mode for a single box. To experiment:
+#   "10" = single char (fits in theory, but fussy when blurry)
+#   "8"  = single word (often more robust, even with one digit)
+#   "13" = raw line, no Tesseract pre-segmentation
 PSM = "10"
 
 
 def _find_font():
-    """Erste vorhandene Schrift finden. ImageMagick 7 auf dem Mac (brew) hat
-    oft KEINE Default-Font gesetzt -> '-draw text' bricht ab. Darum explizit
-    angeben. macOS und Linux/Pi haben unterschiedliche Pfade."""
+    """First available font. ImageMagick 7 on Mac (brew) often has NO default
+    font -> '-draw text' aborts. Set it explicitly; macOS and Linux/Pi differ."""
     for path in (
         "/System/Library/Fonts/Supplemental/Arial.ttf",    # macOS
-        "/System/Library/Fonts/Helvetica.ttc",             # macOS (praktisch immer da)
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",      # Debian / Raspberry Pi OS
+        "/System/Library/Fonts/Helvetica.ttc",             # macOS (almost always there)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",      # Debian / Pi OS
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     ):
         if os.path.isfile(path):
             return path
-    return None  # keine gefunden -> Labels werden weggelassen, Boxen trotzdem gezeichnet
+    return None  # none found -> labels dropped, boxes still drawn
 
 
 FONT = _find_font()
@@ -58,9 +57,9 @@ def make_overlay(src, out):
     for b in BOXES:
         rot = b.get("rot", 0)
         if rot:
-            # Die Box, die im Originalbild dem (CCW-)gedrehten Ausschnitt
-            # entspricht, ist um den Mittelpunkt im UZS gedreht. Ecken explizit
-            # rechnen (Bildschirm-Koordinaten, y nach unten):
+            # The box matching the CCW-rotated crop is rotated CW around its
+            # center in the original. Compute corners explicitly (screen
+            # coords, y down):
             cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
             hw, hh = b["w"] / 2, b["h"] / 2
             a = math.radians(rot)
@@ -83,6 +82,8 @@ def make_overlay(src, out):
 
 
 def make_contact(src, out):
+    # Deliberately pad-free: the contact sheet answers "is the box on the
+    # digit", not "does Tesseract have a quiet zone" (that's process_box).
     tiles = []
     for b in BOXES:
         raw = os.path.join(TMP, f"_raw_{b['name']}.png")
@@ -111,36 +112,28 @@ def make_contact(src, out):
 
 
 def ocr_box(src, b):
-    # Gleiche Pipeline wie boxen.py, aber mit konfigurierba rem PSM
-    # (zum Experimentieren waehrend der Kalibrierung).
-    # Eingabe fuer Tesseract als sauberes 8-Bit-TIFF ohne Profil: ImageMagick 7
-    # (magick) schreibt PNGs, die die Tesseract-Bibliothek (Leptonica) auf manchen
-    # Systemen nicht einlesen kann -> leere Ausgabe. TIFF + -depth 8 -strip umgeht das.
-    raw = os.path.join(TMP, f"_raw_{b['name']}.png")
-    crop_box(src, b, raw)
-    level = ["-auto-level"] if b["level"] is None else ["-level", b["level"]]
-    tmp = os.path.join(TMP, f"_ocr_{b['name']}.tif")
-    subprocess.run([MAGICK, raw, *level, "-negate", "-colorspace", "Gray",
-                    "-depth", "8", "-strip", tmp], check=True)
-    os.remove(raw)
+    # Image pipeline (crop/rotate/level/pad/negate) comes from
+    # boxen.process_box - one source of truth so the calibration read matches
+    # the live read exactly. Only the PSM stays variable here.
+    tif = process_box(src, b, TMP)
     res = subprocess.run(
-        ["tesseract", tmp, "stdout", "--psm", PSM,
+        ["tesseract", tif, "stdout", "--psm", PSM,
          "-c", "tessedit_char_whitelist=0123456789"],
         capture_output=True, encoding="utf-8", errors="replace",
     )
-    os.remove(tmp)
+    os.remove(tif)
     return res.stdout.strip()
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Aufruf: python3 boxen_test.py <foto.jpg> [--ocr]")
+        print("Usage: python3 boxen_test.py <foto.jpg> [--ocr]")
         sys.exit(1)
 
     src = sys.argv[1]
     do_ocr = "--ocr" in sys.argv[2:]
     if not os.path.isfile(src):
-        print(f"Datei nicht gefunden: {src}")
+        print(f"File not found: {src}")
         sys.exit(1)
 
     base = os.path.splitext(os.path.basename(src))[0]
@@ -148,22 +141,22 @@ def main():
 
     make_overlay(src, overlay)
     make_contact(src, contact)
-    print(f"geschrieben: {overlay}  (Foto mit eingezeichneten Boxen)")
-    print(f"geschrieben: {contact}  (Boxen einzeln nebeneinander)")
+    print(f"written: {overlay}  (photo with boxes drawn)")
+    print(f"written: {contact}  (boxes side by side)")
 
     if do_ocr:
-        print(f"\nOCR pro Box (Tesseract --psm {PSM}):")
+        print(f"\nOCR per box (Tesseract --psm {PSM}):")
         reads = [(b["name"], ocr_box(src, b)) for b in BOXES]
         for name, val in reads:
             print(f"  {name}: {val!r}")
-        print("  ergibt: " + "".join(v if v else "?" for _, v in reads))
+        print("  result: " + "".join(v if v else "?" for _, v in reads))
 
 
 # ---------------------------------------------------------------------------
-# MESSEN der level-Werte pro Box (wenn die Lage stimmt), pro Box einzeln:
+# MEASURING level values per box (once placement is right), one box at a time:
 #   convert foto.jpg -crop 140x250+520+452 +repage -colorspace Gray \
 #     -format "%[fx:100*minima] %[fx:100*maxima]" info:
-# Ausgabe z.B. "4.1 36.8" -> level: "4%,37%" in der jeweiligen Box eintragen.
+# Output e.g. "4.1 36.8" -> level: "4%,37%" in that box.
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":

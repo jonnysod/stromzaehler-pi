@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Quelle der Wahrheit für Box-Kalibrierung und Ziffern-OCR.
+Single source of truth for box calibration and digit OCR.
 
-Exportiert:
-  BOXES        – kalibrierte Box-Definitionen (7 Stellen)
-  MAGICK       – ImageMagick-Befehl ('magick' auf Mac, 'convert' auf Pi)
-  TMP          – plattformsicheres Temp-Verzeichnis (nicht hart /tmp)
-  crop_box()   – kanonisches Crop + Drehen um Box-Mittelpunkt
-  read_boxes() – Foto → {boxname: (zeichen, konfidenz)}
+Exports:
+  BOXES         - calibrated box definitions (7 digits)
+  MAGICK        - ImageMagick binary ('magick' on Mac, 'convert' on Pi)
+  TMP           - platform-safe temp dir (not hardcoded /tmp)
+  crop_box()    - canonical crop + rotate around box center
+  process_box() - crop + level + pad + negate -> OCR-ready TIFF (shared)
+  read_boxes()  - photo -> {boxname: (char, confidence)}
 """
 import math
 import os
@@ -16,51 +17,50 @@ import subprocess
 import tempfile
 
 # ---------------------------------------------------------------------------
-# Box-Kalibrierung (einziger Edit-Punkt)
+# Box calibration (single edit point)
 # ---------------------------------------------------------------------------
-# Koordinaten: volle Bildkoordinate, wie ImageMagick -crop WxH+X+Y.
-#   d1–d6 = sechs schwarze Stellen (ganze kWh, links → rechts)
-#   Z     = rote Zehntelstelle (0,1 kWh = 100 Wh)
+# Coords: full-image, like ImageMagick -crop WxH+X+Y.
+#   d1-d6 = six black digits (whole kWh, left -> right)
+#   Z     = red tenths digit (0.1 kWh = 100 Wh)
 #
-# level: None   → -auto-level
-#        String → -level <string>, z.B. "3%,38%"
-# rot: Drehung um den Box-Mittelpunkt VOR dem Zuschnitt.
-#      Positiver Winkel = CCW (gegen den Uhrzeigersinn).
+# level: None   -> -auto-level
+#        string -> -level <string>, e.g. "3%,38%"
+# rot:   rotation around box center BEFORE crop. Positive = CCW.
+# pad:   black border (px) added after level, before negate. Forces a quiet
+#        zone so psm-10 doesn't merge an edge-filling digit with the image
+#        border (such digits otherwise read empty).
 # ---------------------------------------------------------------------------
 BOXES = [
-    {"name": "d1", "x":   64, "y": 442, "w": 155, "h": 290, "level": "6%,34%", "rot": 0},
-    {"name": "d2", "x":  292, "y": 442, "w": 155, "h": 290, "level": "8%,37%", "rot": 0},
-    {"name": "d3", "x":  510, "y": 442, "w": 160, "h": 290, "level": "7%,36%", "rot": 0},
-    {"name": "d4", "x":  737, "y": 432, "w": 173, "h": 290, "level": "7%,30%", "rot": 0},
-    {"name": "d5", "x":  970, "y": 442, "w": 164, "h": 290, "level": "7%,26%", "rot": 2},
-    {"name": "d6", "x": 1200, "y": 442, "w": 159, "h": 290, "level": "5%,25%", "rot": 2},
-    {"name": "Z",  "x": 1449, "y": 460, "w": 150, "h": 260, "level": "5%,23%", "rot": 2},
+    {"name": "d1", "x":   49, "y": 497, "w": 155, "h": 270, "level": None, "rot": 0, "pad": 40},
+    {"name": "d2", "x":  277, "y": 467, "w": 155, "h": 290, "level": None, "rot": 0, "pad": 0},
+    {"name": "d3", "x":  495, "y": 467, "w": 160, "h": 290, "level": None, "rot": 0, "pad": 0},
+    {"name": "d4", "x":  722, "y": 457, "w": 173, "h": 290, "level": None, "rot": 0, "pad": 0},
+    {"name": "d5", "x":  955, "y": 467, "w": 164, "h": 280, "level": None, "rot": 0, "pad": 20},
+    {"name": "d6", "x": 1185, "y": 467, "w": 159, "h": 290, "level": None, "rot": 0, "pad": 0},
+    {"name": "Z",  "x": 1457, "y": 470, "w": 120, "h": 235, "level": None, "rot": 0, "pad": 0},
 ]
 
 # ---------------------------------------------------------------------------
-# Plattform-Konstanten
+# Platform constants
 # ---------------------------------------------------------------------------
 
-# IM7 (magick) auf Mac via brew, IM6 (convert) auf dem Pi.
+# IM7 (magick) on Mac via brew, IM6 (convert) on the Pi.
 MAGICK = "magick" if shutil.which("magick") else "convert"
 
-# Zwischendateien nicht hart nach /tmp: auf macOS ist /tmp für
-# Homebrew-Binaries gesperrt. tempfile nimmt $TMPDIR (Pi: /tmp, Mac: ~/...)
+# Don't hardcode /tmp: on macOS it's blocked for Homebrew binaries.
+# tempfile picks $TMPDIR (Pi: /tmp, Mac: ~/...).
 TMP = tempfile.gettempdir()
 
 
 # ---------------------------------------------------------------------------
-# Kanonisches Crop + Drehen
+# Canonical crop + rotate
 # ---------------------------------------------------------------------------
 
 def crop_box(src, b, out):
-    """Schneidet Box b aus src und schreibt das Ergebnis nach out.
+    """Crop box b from src into out.
 
-    Bei rot != 0 wird das Vollbild großzügig um den Box-Mittelpunkt gedreht,
-    bevor die eigentliche Box ausgeschnitten wird. So gehen keine Ecken durch
-    Clipping verloren.
-
-    Positiver rot-Winkel = CCW (gegen den Uhrzeigersinn).
+    With rot != 0 the full image is rotated generously around the box center
+    before cropping, so no corner is lost to clipping. Positive rot = CCW.
     """
     rot = b.get("rot", 0)
     if not rot:
@@ -71,9 +71,8 @@ def crop_box(src, b, out):
         )
         return
 
-    # Großzügig quadratisch um den Box-Mittelpunkt schneiden (halbe Diagonale
-    # als Rand), damit beim Drehen keine Ecke fehlt, dann drehen, dann die
-    # eigentliche Box aus der Mitte herausschneiden.
+    # Crop a generous square around the center (half-diagonal margin) so no
+    # corner is missing after rotation, rotate, then cut the real box.
     pad = int(math.hypot(b["w"], b["h"]) / 2) + 2
     cx, cy = b["x"] + b["w"] // 2, b["y"] + b["h"] // 2
     side = pad * 2
@@ -83,7 +82,7 @@ def crop_box(src, b, out):
             MAGICK, src,
             "-crop", f"{side}x{side}+{cx - pad}+{cy - pad}", "+repage",
             "-virtual-pixel", "black",
-            "-distort", "SRT", str(-rot),  # SRT positiv = CW → negieren für CCW
+            "-distort", "SRT", str(-rot),  # SRT positive = CW -> negate for CCW
             "+repage",
             "-crop", f"{b['w']}x{b['h']}+{bx}+{by}", "+repage",
             out,
@@ -93,21 +92,29 @@ def crop_box(src, b, out):
 
 
 # ---------------------------------------------------------------------------
-# OCR-Pipeline
+# OCR pipeline (shared with boxen_test.py)
 # ---------------------------------------------------------------------------
 
-def _process_box(foto_path, box, tmp_dir):
-    """Crop + Drehen + Level + Negate + Graustufen → 8-Bit-TIFF.
+def process_box(foto_path, box, tmp_dir):
+    """Crop + rotate + level + pad + negate + grayscale -> 8-bit TIFF.
 
-    Verwendet crop_box() für den Crop/Dreh-Schritt.
-    Gibt den Pfad zur erzeugten TIFF-Datei zurück.
+    Order matters:
+      - pad AFTER level: pure black must not pin -auto-level's min to 0.
+      - pad BEFORE negate: the black border flips to white and becomes the
+        quiet zone Tesseract needs around the (now dark) digit.
+
+    Returns the path to the generated TIFF.
     """
     raw = os.path.join(tmp_dir, f"{box['name']}_raw.png")
     crop_box(foto_path, box, raw)
 
     level = box.get("level")
+    pad = box.get("pad", 0)
+
     args = [MAGICK, raw]
     args += ["-level", level] if level is not None else ["-auto-level"]
+    if pad:
+        args += ["-bordercolor", "black", "-border", str(pad)]
     args += ["-negate", "-colorspace", "Gray", "-depth", "8", "-strip"]
 
     out_path = os.path.join(tmp_dir, f"{box['name']}.tif")
@@ -121,11 +128,10 @@ def _process_box(foto_path, box, tmp_dir):
 
 
 def _ocr_box(tif_path):
-    """Tesseract --psm 10 auf dem TIFF; gibt (zeichen, konfidenz) zurück.
+    """Tesseract --psm 10 on the TIFF; returns (char, confidence).
 
-    Konfidenz ist ein Gewicht, kein Tor: korrekte Reads haben bei Unschärfe
-    oft niedrige Konfidenz, Fehlreads aber meist 0.
-    Leerwert = ("", 0).
+    Confidence is a weight, not a gate: correct reads often have low
+    confidence when blurry, misreads mostly 0. Empty = ("", 0).
     """
     result = subprocess.run(
         [
@@ -138,12 +144,12 @@ def _ocr_box(tif_path):
     )
 
     best_char, best_conf = "", 0
-    for line in result.stdout.strip().splitlines()[1:]:  # Zeile 0 = TSV-Header
+    for line in result.stdout.strip().splitlines()[1:]:  # line 0 = TSV header
         parts = line.split("\t")
         if len(parts) < 12:
             continue
         try:
-            conf = int(float(parts[10]))
+            conf = int(parts[10])
         except ValueError:
             continue
         if conf < 0:
@@ -156,28 +162,28 @@ def _ocr_box(tif_path):
 
 
 def read_boxes(foto_path, debug_label=None, debug_dir=None):
-    """Liest alle 7 Boxen aus dem Foto.
+    """Read all 7 boxes from the photo.
 
-    Parameter:
-      foto_path   – Pfad zum vollen Originalfoto (JPG)
-      debug_label – Zeitstempel-Präfix im Basic-Format, z.B. '20260625T143001Z'.
-                    Ist dieser und debug_dir gesetzt, wird das gelevelte TIFF
-                    (genau das, was Tesseract sah) nach
-                    {debug_dir}/{debug_label}_{boxname}.tif kopiert.
-      debug_dir   – Zielverzeichnis für Debug-TIFFs; muss existieren.
+    Params:
+      foto_path   - path to the full original photo (JPG)
+      debug_label - basic-format timestamp prefix, e.g. '20260625T143001Z'.
+                    With debug_dir set, the leveled TIFF (exactly what
+                    Tesseract saw) is copied to
+                    {debug_dir}/{debug_label}_{boxname}.tif.
+      debug_dir   - target dir for debug TIFFs; must exist.
 
-    Rückgabe:
-      {boxname: (zeichen, konfidenz)}
-        zeichen   : "0".."9" oder "" (Leerwert ist gültiger Zustand)
-        konfidenz : 0..100; 0 bei Leerwert
+    Returns:
+      {boxname: (char, confidence)}
+        char : "0".."9" or "" (empty is a valid state)
+        conf : 0..100; 0 when empty
 
-    Temp-Dateien werden immer aufgeräumt. Debug-Copies bleiben liegen
-    (Retention via systemd-tmpfiles, nicht per Code).
+    Temp files are always cleaned up. Debug copies stay (retention via
+    systemd-tmpfiles, not in code).
     """
     results = {}
     with tempfile.TemporaryDirectory(dir=TMP) as tmp_dir:
         for box in BOXES:
-            tif_path = _process_box(foto_path, box, tmp_dir)
+            tif_path = process_box(foto_path, box, tmp_dir)
             results[box["name"]] = _ocr_box(tif_path)
             if debug_label and debug_dir:
                 dst = os.path.join(debug_dir, f"{debug_label}_{box['name']}.tif")
