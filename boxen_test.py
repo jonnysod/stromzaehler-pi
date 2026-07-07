@@ -4,14 +4,16 @@ Calibration helper for digit segmentation.
 
 Crops the individual digit boxes from a photo and produces:
   <name>_overlay.png  - photo with boxes drawn on it   (adjust placement)
-  <name>_boxen.png    - all boxes side by side          (judge content)
+  <name>_boxen.png    - boxes side by side, positive    (judge placement)
+  <name>_ocr.png      - boxes negated + padded, labeled with the OCR read
+                        (only with --ocr; exactly what Tesseract sees)
 
 Workflow: run, look at the images, tweak BOXES, repeat until every digit
 sits centered and complete in its box.
 
 Usage:
-    python3 boxen_test.py foto.jpg          # images only
-    python3 boxen_test.py foto.jpg --ocr    # plus Tesseract per box
+    python3 boxen_test.py foto.jpg          # placement images only
+    python3 boxen_test.py foto.jpg --ocr    # + Tesseract read + OCR view
 """
 
 import math
@@ -19,17 +21,15 @@ import os
 import subprocess
 import sys
 
-from boxen import BOXES, MAGICK, TMP, crop_box, process_box
+from boxen import BOXES, MAGICK, TMP, PSM as LIVE_PSM, crop_box, process_box, ocr_tif
 
 # Overlay only: lifts the dark display field so the digits under the boxes
 # are visible. Does NOT affect the boxes themselves.
 DISPLAY_LEVEL = "0%,55%"
 
-# Tesseract page-segmentation mode for a single box. To experiment:
-#   "10" = single char (fits in theory, but fussy when blurry)
-#   "8"  = single word (often more robust, even with one digit)
-#   "13" = raw line, no Tesseract pre-segmentation
-PSM = "10"
+# Experiment knob: defaults to the live PSM so the calibration read matches
+# production. Change only to try other modes during calibration ("10", "13").
+PSM = LIVE_PSM
 
 
 def _find_font():
@@ -82,8 +82,8 @@ def make_overlay(src, out):
 
 
 def make_contact(src, out):
-    # Deliberately pad-free: the contact sheet answers "is the box on the
-    # digit", not "does Tesseract have a quiet zone" (that's process_box).
+    # Positive, pad-free: answers "is the box on the digit", not "does
+    # Tesseract have a quiet zone" (that's make_contact_ocr / process_box).
     tiles = []
     for b in BOXES:
         raw = os.path.join(TMP, f"_raw_{b['name']}.png")
@@ -111,18 +111,40 @@ def make_contact(src, out):
         os.remove(t)
 
 
-def ocr_box(src, b):
-    # Image pipeline (crop/rotate/level/pad/negate) comes from
-    # boxen.process_box - one source of truth so the calibration read matches
-    # the live read exactly. Only the PSM stays variable here.
-    tif = process_box(src, b, TMP)
-    res = subprocess.run(
-        ["tesseract", tif, "stdout", "--psm", PSM,
-         "-c", "tessedit_char_whitelist=0123456789"],
-        capture_output=True, encoding="utf-8", errors="replace",
-    )
-    os.remove(tif)
-    return res.stdout.strip()
+def make_contact_ocr(src, out):
+    """Negated + padded OCR view: the actual process_box TIFF per box (exactly
+    what Tesseract receives), labeled with its read 'name: char (conf)'.
+
+    Returns [(name, char, conf), ...] so the caller reuses this single OCR pass
+    instead of reading each box twice. Separate file from make_contact so the
+    positive placement view stays untouched.
+    """
+    tiles, reads = [], []
+    for b in BOXES:
+        tif = process_box(src, b, TMP)          # negated, padded, grayscale
+        char, conf = ocr_tif(tif, PSM)
+        reads.append((b["name"], char, conf))
+        label = f"{b['name']}: {char or '?'} ({conf})"
+        tile = os.path.join(TMP, f"_ocr_{b['name']}.png")
+        cmd = [
+            MAGICK, tif, "-colorspace", "sRGB",
+            "-bordercolor", "#00ff66", "-border", "2",
+            "-background", "#222222", "-gravity", "North", "-splice", "0x30",
+        ]
+        if FONT:
+            cmd += ["-fill", "yellow", "-font", FONT,
+                    "-pointsize", "18", "-annotate", "+0+4", label]
+        cmd.append(tile)
+        subprocess.run(cmd, check=True)
+        os.remove(tif)
+        tiles.append(tile)
+    subprocess.run([
+        MAGICK, *tiles, "+append",
+        "-background", "#222222", "-bordercolor", "#222222", "-border", "6", out,
+    ], check=True)
+    for t in tiles:
+        os.remove(t)
+    return reads
 
 
 def main():
@@ -142,14 +164,16 @@ def main():
     make_overlay(src, overlay)
     make_contact(src, contact)
     print(f"written: {overlay}  (photo with boxes drawn)")
-    print(f"written: {contact}  (boxes side by side)")
+    print(f"written: {contact}  (boxes side by side, positive)")
 
     if do_ocr:
+        ocr_png = f"{base}_ocr.png"
+        reads = make_contact_ocr(src, ocr_png)
+        print(f"written: {ocr_png}  (negated + padded, what Tesseract sees)")
         print(f"\nOCR per box (Tesseract --psm {PSM}):")
-        reads = [(b["name"], ocr_box(src, b)) for b in BOXES]
-        for name, val in reads:
-            print(f"  {name}: {val!r}")
-        print("  result: " + "".join(v if v else "?" for _, v in reads))
+        for name, char, conf in reads:
+            print(f"  {name}: {char!r:6} conf={conf}")
+        print("  result: " + "".join(c if c else "?" for _, c, _ in reads))
 
 
 # ---------------------------------------------------------------------------
