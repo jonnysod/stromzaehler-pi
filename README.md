@@ -49,3 +49,7 @@ python3 boxen_test.py photo.jpg --ocr
 ```
 
 This produces an overlay image and a contact sheet. Adjust `BOXES` in `boxen.py` until every digit sits centered in its box.
+
+## Built with Claude
+
+This project is developed in collaboration with [Claude](https://claude.ai) (Anthropic). Concept, algorithm and code are discussed and written together; decisions and testing on the real meter are mine.

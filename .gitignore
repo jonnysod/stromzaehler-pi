@@ -12,3 +12,7 @@ cron.log
 .DS_Store
 *.swp
 
+
+# Claude Code (local only)
+CLAUDE.md
+.claude/settings.local.json
